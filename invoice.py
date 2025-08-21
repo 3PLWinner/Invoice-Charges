@@ -6,38 +6,60 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
+# -------------------------------
 # Selenium setup
+# -------------------------------
 def setup_selenium_driver():
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--start-maximized")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     return driver
 
-# Login function (works correctly)
+# -------------------------------
+# Login function
 def login_to_3plwhs(driver, url, username, password):
     driver.get(url)
-    wait = WebDriverWait(driver, 15)
-    
-    # Type credentials
+    wait = WebDriverWait(driver, 30)
+
+    # Enter credentials
     wait.until(EC.presence_of_element_located((By.NAME, "username"))).send_keys(username)
     wait.until(EC.presence_of_element_located((By.NAME, "password"))).send_keys(password)
-    
-    # Click login button (handles <span> inside button)
+
+    # Click login button
     login_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Login']/..")))
     login_btn.click()
-    
-    # Wait for system selection boxes to appear
+
+    # Wait for the URL to start with post-login VeraCore path
     try:
-        system_boxes = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "SystemSelectClassic")))
+        wait.until(lambda d: d.current_url.startswith("https://wms.3plwinner.com/VeraCore/Home/?auth="))
+    except:
+        return None  # login failed
+
+    # Wait for the system container and ensure it has child elements
+    try:
+        system_container = wait.until(
+            EC.presence_of_element_located((By.ID, "VeraCoreViewport-outerCt"))
+        )
+
+        # Wait until the container has at least one system box
+        wait.until(lambda d: len(system_container.find_elements(By.CSS_SELECTOR, ".system-box")) > 0)
+
+        system_boxes = system_container.find_elements(By.CSS_SELECTOR, ".system-box")
         return system_boxes
     except:
         return None
 
+
+
+
+
+# -------------------------------
 # Streamlit app
+# -------------------------------
 st.title("Invoice Charges Automation")
 
 # Step 1: Credentials
-veracore_url = st.text_input("3PLWHS URL", value="https://wms.3plwinner.com/VeraCore/Home/#systems")
+veracore_url = st.text_input("3PLWHS URL", value="https://wms.3plwinner.com/VeraCore")
 username = st.text_input("Username")
 password = st.text_input("Password", type="password")
 
@@ -80,14 +102,17 @@ if st.session_state.get("logged_in"):
 
     if st.button("Run Automation"):
         driver = st.session_state["driver"]
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, 15)
         for fee in fees:
             driver.get(f"{veracore_url}/accessorial_activities")
             
             # Click the selected system box dynamically
-            system_boxes = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".system-box")))
+            system_container = wait.until(
+                EC.presence_of_element_located((By.ID, "VeraCoreViewport-outerCt"))
+            )
+            system_boxes = system_container.find_elements(By.CSS_SELECTOR, ".system-box")
             for box in system_boxes:
-                if box.text == fee["system"]:
+                if box.text.strip() == fee["system"]:
                     box.click()
                     break
             
@@ -101,6 +126,7 @@ if st.session_state.get("logged_in"):
             submit_btn.click()
         
         st.success("All fees processed!")
+
 
 
 
