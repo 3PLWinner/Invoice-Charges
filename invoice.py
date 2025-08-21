@@ -30,9 +30,9 @@ def login_to_3plwhs(driver, url, username, password):
     login_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Login']/..")))
     login_btn.click()
     
-    # Confirm login by waiting for dashboard element
+    # Wait for system dropdown to appear on the home page
     try:
-        wait.until(EC.presence_of_element_located((By.ID, "dashboard")))
+        system_dropdown = wait.until(EC.presence_of_element_located((By.NAME, "system_select")))
         return True
     except:
         return False
@@ -52,19 +52,34 @@ if st.button("Login"):
     login_success = login_to_3plwhs(driver, veracore_url, username, password)
     
     if login_success:
-        st.success("✅ Login successful!")
-        st.session_state["driver"] = driver  # Keep driver session for next steps
+        st.success("✅ Login successful! Please select your system.")
+        st.session_state["driver"] = driver
         st.session_state["logged_in"] = True
     else:
         st.error("❌ Login failed. Check your credentials.")
 
-# Step 2: Only show fee form if logged in
+# Step 2: Only show system selection if logged in
 if st.session_state.get("logged_in"):
+    driver = st.session_state["driver"]
+    wait = WebDriverWait(driver, 10)
+    
+    # Grab available systems from dropdown on home page
+    system_options = [option.text for option in wait.until(
+        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "select[name='system_select'] option"))
+    )]
+    
+    selected_system = st.selectbox("Select System", system_options)
+    
+    if st.button("Confirm System"):
+        # Select system in browser
+        system_dropdown = driver.find_element(By.NAME, "system_select")
+        system_dropdown.send_keys(selected_system)
+        st.success(f"System '{selected_system}' selected. You can now enter fees.")
+        st.session_state["system_selected"] = selected_system
+
+# Step 3: Fee input only if system selected
+if st.session_state.get("system_selected"):
     st.header("Fee Entries")
-    
-    systems = ["System A", "System B", "System C"]  # Could be dynamic later
-    selected_system = st.text_input("System ID")  # For now manually typing system
-    
     fees = []
     with st.form("fee_form"):
         fee_type = st.text_input("Fee Type")
@@ -77,30 +92,10 @@ if st.session_state.get("logged_in"):
                 "fee_type": fee_type,
                 "quantity": quantity,
                 "reference_number": reference_number,
-                "system": selected_system
+                "system": st.session_state["system_selected"]
             })
             st.success(f"Added fee: {fee_type}, Qty: {quantity}, Ref: {reference_number}")
 
-    if st.button("Run Automation"):
-        driver = st.session_state["driver"]
-        wait = WebDriverWait(driver, 10)
-        for fee in fees:
-            driver.get(f"{veracore_url}/accessorial_activities")
-            
-            # Select system
-            system_input = wait.until(EC.presence_of_element_located((By.NAME, "system_select")))
-            system_input.send_keys(fee["system"])
-            
-            # Input fee info
-            wait.until(EC.presence_of_element_located((By.NAME, "fee_type"))).send_keys(fee["fee_type"])
-            wait.until(EC.presence_of_element_located((By.NAME, "quantity"))).send_keys(str(fee["quantity"]))
-            wait.until(EC.presence_of_element_located((By.NAME, "reference_number"))).send_keys(fee["reference_number"])
-            
-            # Click submit
-            submit_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Submit']")))
-            submit_btn.click()
-        
-        st.success("All fees processed!")
 
 
 
