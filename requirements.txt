@@ -1,0 +1,6 @@
+streamlit
+opencv-python
+pyzbar
+selenium
+numpy
+webdriver-manager
