@@ -80,15 +80,15 @@ def add_fee_to_veracore(driver, fee):
 # ----------------------
 # Streamlit App
 # ----------------------
-st.title("📋 Veracore Fee Entry")
+st.title("Veracore Fee Entry")
 
 with st.sidebar:
-    st.header("🔐 Veracore Login")
+    st.header("Veracore Login")
     veracore_url = st.text_input("Login URL", value="https://wms.3plwinner.com/VeraCore/Home")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-st.subheader("📝 Enter Fee Details")
+st.subheader("Enter Fee Details")
 st.session_state.current_fee['fee_type'] = st.text_input("Fee Type", st.session_state.current_fee['fee_type'])
 st.session_state.current_fee['system'] = st.selectbox("System", ["System A", "System B", "System C"], index=0)
 st.session_state.current_fee['quantity'] = st.text_input("Quantity", st.session_state.current_fee['quantity'])
@@ -97,7 +97,7 @@ st.session_state.current_fee['reference_number'] = st.text_input("Reference Numb
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("➕ Add Fee to List"):
+    if st.button("Add Fee to List"):
         if all(st.session_state.current_fee.values()):
             st.session_state.fees.append(st.session_state.current_fee.copy())
             st.session_state.current_fee = {'fee_type': '', 'system': '', 'quantity': '', 'reference_number': ''}
@@ -106,12 +106,12 @@ with col1:
             st.warning("Please fill all fields before adding.")
 
 with col2:
-    if st.button("🗑️ Clear Current Fee"):
+    if st.button("Clear Current Fee"):
         st.session_state.current_fee = {'fee_type': '', 'system': '', 'quantity': '', 'reference_number': ''}
 
 # Display fee list
 if st.session_state.fees:
-    st.subheader("📝 Fee List")
+    st.subheader("Fee List")
     for i, fee in enumerate(st.session_state.fees):
         st.write(f"Fee {i+1}: {fee['fee_type']} | {fee['system']} | Qty: {fee['quantity']} | Ref: {fee['reference_number']}")
         if st.button(f"Remove Fee {i+1}", key=f"remove_{i}"):
@@ -119,7 +119,7 @@ if st.session_state.fees:
             st.experimental_rerun()
 
 # Submit fees to Veracore
-st.subheader("🚀 Submit Fees")
+st.subheader("Submit Fees")
 if st.button("Login & Process All Fees"):
     if username and password and veracore_url:
         driver = setup_selenium_driver()
