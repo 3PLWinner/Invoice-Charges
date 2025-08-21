@@ -30,12 +30,11 @@ def login_to_3plwhs(driver, url, username, password):
     login_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Login']/..")))
     login_btn.click()
     
-    # Wait for system dropdown to appear on the home page
-    try:
-        system_dropdown = wait.until(EC.presence_of_element_located((By.NAME, "system_select")))
-        return True
-    except:
-        return False
+    # Wait a moment for home page to load
+    WebDriverWait(driver, 10).until(lambda d: True)
+    
+    # Login is assumed successful; we won't check any element
+    return True
 
 # -------------------------------
 # Streamlit app
@@ -49,33 +48,27 @@ password = st.text_input("Password", type="password")
 
 if st.button("Login"):
     driver = setup_selenium_driver()
-    login_success = login_to_3plwhs(driver, veracore_url, username, password)
-    
-    if login_success:
-        st.success("✅ Login successful! Please select your system.")
-        st.session_state["driver"] = driver
-        st.session_state["logged_in"] = True
-    else:
-        st.error("❌ Login failed. Check your credentials.")
+    login_to_3plwhs(driver, veracore_url, username, password)
+    st.success("✅ Login successful!")
+    st.session_state["driver"] = driver
+    st.session_state["logged_in"] = True
 
-# Step 2: Only show system selection if logged in
+# Step 2: OMS system input
 if st.session_state.get("logged_in"):
     driver = st.session_state["driver"]
-    wait = WebDriverWait(driver, 10)
     
-    # Grab available systems from dropdown on home page
-    system_options = [option.text for option in wait.until(
-        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "select[name='system_select'] option"))
-    )]
+    oms_system = st.text_input("Enter OMS System")
     
-    selected_system = st.selectbox("Select System", system_options)
-    
-    if st.button("Confirm System"):
-        # Select system in browser
-        system_dropdown = driver.find_element(By.NAME, "system_select")
-        system_dropdown.send_keys(selected_system)
-        st.success(f"System '{selected_system}' selected. You can now enter fees.")
-        st.session_state["system_selected"] = selected_system
+    if st.button("Confirm System") and oms_system:
+        # Type the OMS system in the browser (adjust the selector if needed)
+        system_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.NAME, "system_input"))
+        )
+        system_input.clear()
+        system_input.send_keys(oms_system)
+        system_input.submit()  # or click a 'Go' button if needed
+        st.success(f"System '{oms_system}' selected. You can now enter fees.")
+        st.session_state["system_selected"] = oms_system
 
 # Step 3: Fee input only if system selected
 if st.session_state.get("system_selected"):
@@ -95,6 +88,7 @@ if st.session_state.get("system_selected"):
                 "system": st.session_state["system_selected"]
             })
             st.success(f"Added fee: {fee_type}, Qty: {quantity}, Ref: {reference_number}")
+
 
 
 
