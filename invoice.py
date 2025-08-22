@@ -10,7 +10,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 import time
 
-
 FEE_TYPES = [
     "RCV - Shrink Wrap",
     "RCV - Sorting",
@@ -73,14 +72,8 @@ FEE_TYPES = [
     "PP - Box 12x6x4"
 ]
 
-
-# -------------------------------
-# Selenium setup
-# -------------------------------
 def setup_selenium_driver():
     chrome_options = Options()
-
-    chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--start-maximized")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -89,10 +82,6 @@ def setup_selenium_driver():
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 
-
-# -------------------------------
-# Open accessorial fee window
-# -------------------------------
 def open_accessorial_fee_window(driver, wait):
     """Opens the accessorial fee window with multiple strategies"""
     try:
@@ -109,28 +98,21 @@ def open_accessorial_fee_window(driver, wait):
         try:
             accfee_btn.click()
             clicked = True
-            st.info("🎯 Accessorial fee window opened (regular click)")
         except:
             try:
                 driver.execute_script("arguments[0].click();", accfee_btn)
                 clicked = True
-                st.info("🎯 Accessorial fee window opened (JS click)")
             except:
                 ActionChains(driver).move_to_element(accfee_btn).click().perform()
                 clicked = True
-                st.info("🎯 Accessorial fee window opened (action chains)")
         
         if clicked:
             time.sleep(3)  # Wait for window to fully load
             return True
     except Exception as e:
-        st.error(f"❌ Failed to open accessorial fee window: {str(e)}")
+        st.error(f"Failed to open fee window: {str(e)}")
         return False
-    
 
-# -------------------------------
-# Login and select system
-# -------------------------------
 def login_and_select_system(driver, url, username, password, system_id):
     wait = WebDriverWait(driver, 30)
     driver.get(url)
@@ -172,48 +154,24 @@ def login_and_select_system(driver, url, username, password, system_id):
     except:
         pass  # Mask might not be present or might already be gone
 
-
     # Automatically open the accessorial fee window immediately after login
     open_accessorial_fee_window(driver, wait)
 
     return True
 
-
-
-def wait_for_no_overlay(driver, timeout=30):
-    """Wait until any ExtJS loading mask/overlay disappears."""
-    WebDriverWait(driver, timeout).until_not(
-        EC.presence_of_element_located(
-            (By.XPATH, "//div[contains(@class, 'x-mask') and not(contains(@style,'display: none'))]")
-        )
-    )
-
-
-
-
-# -------------------------------
-# Add a fee with improved workflow and debugging
-# -------------------------------
 def add_fee(driver, wait, fee_type, quantity, reference):
-    st.info("➡️ Starting add_fee process...")
-
     try:
-
         try:
             fee_window = driver.find_element(By.XPATH, "//div[contains(@class,'x-window') and contains(.,'Accessorial Fee')]")
             if not fee_window.is_displayed():
-                st.info("🔄 Accessorial fee window not visible, opening...")
                 open_accessorial_fee_window(driver, wait)
         except:
-            st.info("🔄 Accessorial fee window not found, opening...")
             open_accessorial_fee_window(driver, wait)
-
 
         # Wait for Accessorial Fee window
         fee_window = wait.until(EC.presence_of_element_located((
             By.XPATH, "//div[contains(@class,'x-window') and contains(.,'Accessorial Fee')]"
         )))
-        st.info("✅ Accessorial Fee window detected")
 
         # Find the search box inside the fee window (ignore dynamic IDs)
         search_box = wait.until(EC.element_to_be_clickable((
@@ -226,7 +184,6 @@ def add_fee(driver, wait, fee_type, quantity, reference):
 
         # Only type the first 15 characters to show dropdown options
         search_text = fee_type[:15]
-        st.info(f"Searching with: '{search_text}' (first 15 chars)")
         
         for char in search_text:
             search_box.send_keys(char)
@@ -241,7 +198,6 @@ def add_fee(driver, wait, fee_type, quantity, reference):
                 By.XPATH,
                 f"//tr[contains(@class,'x-grid-row') and td[2]/div[normalize-space(text())='{fee_type}']]"
             )))
-            st.info(f"Found exact match for: {fee_type}")
         except:
             # If exact match fails, try to find a row that contains the search text
             try:
@@ -249,40 +205,31 @@ def add_fee(driver, wait, fee_type, quantity, reference):
                     By.XPATH,
                     f"//tr[contains(@class,'x-grid-row') and td[2]/div[contains(normalize-space(text()), '{search_text}')]]"
                 )))
-                # Get the actual text from the found row
-                actual_fee_text = fee_row.find_element(By.XPATH, "./td[2]/div").text.strip()
-                st.info(f"Found partial match: '{actual_fee_text}' for search '{search_text}'")
             except:
                 # Last resort: click the first available row
                 fee_row = wait.until(EC.element_to_be_clickable((
                     By.XPATH,
                     "//tr[contains(@class,'x-grid-row')][1]"
                 )))
-                actual_fee_text = fee_row.find_element(By.XPATH, "./td[2]/div").text.strip()
-                st.warning(f"Used first available option: '{actual_fee_text}'")
         
         fee_row.click()
-
-        st.info(f"Selected fee type: {fee_type}")
         time.sleep(3)  # let the grid refresh
+        
         try:
             # Strategy 1: Use the active element (since cursor should already be there)
             qty_input = driver.switch_to.active_element
-            st.info("Using active element for quantity input")
         except:
             try:
                 # Strategy 2: Find by the correct ID pattern
                 qty_input = wait.until(EC.element_to_be_clickable((
                     By.XPATH, "//input[contains(@id, 'numberfield-') and contains(@id, '-inputEl')]"
                 )))
-                st.info("Found quantity input by ID pattern")
                 qty_input.click()
             except:
                 # Strategy 3: Find by role and class attributes
                 qty_input = wait.until(EC.element_to_be_clickable((
                     By.XPATH, "//input[@role='spinbutton' and contains(@class, 'x-form-field')]"
                 )))
-                st.info("Found quantity input by role and class")
                 qty_input.click()
 
         # Clear and enter quantity
@@ -311,56 +258,19 @@ def add_fee(driver, wait, fee_type, quantity, reference):
         active = driver.switch_to.active_element
         active.send_keys(Keys.ENTER)
 
-        st.success("💾 Saved fee successfully!")
-
         time.sleep(2)
 
-        st.info("Reopening Accessorial Fee Window for next entry...")
+        # Reopen for next entry
         success = open_accessorial_fee_window(driver, wait)
 
-        if success:
-            st.success("Ready for next fee entry")
-        else:
-            st.warning("Could not automatically reopen accessorial fee window. Use the 'Test Accessorial Button' to open it manually.")
-
-        st.success(f"✅ Fee added successfully!\n\nFee Type: {fee_type}\nQuantity: {quantity}\nReference: {reference}")
+        return True
 
     except Exception as e:
-        st.error(f"❌ Error in add_fee: {e}")
-        
-        # Enhanced debugging information
-        try:
-            # Look for all number fields in the current window
-            number_fields = driver.find_elements(By.XPATH, "//input[contains(@id, 'numberfield-')]")
-            st.info(f"Found {len(number_fields)} number field elements:")
-            for i, field in enumerate(number_fields):
-                field_id = field.get_attribute('id')
-                field_value = field.get_attribute('value')
-                is_displayed = field.is_displayed()
-                st.info(f"  Field {i}: id='{field_id}', value='{field_value}', displayed={is_displayed}")
-                
-            # Also check for any input with spinbutton role
-            spinbutton_fields = driver.find_elements(By.XPATH, "//input[@role='spinbutton']")
-            st.info(f"Found {len(spinbutton_fields)} spinbutton elements:")
-            for i, field in enumerate(spinbutton_fields):
-                field_id = field.get_attribute('id')
-                field_class = field.get_attribute('class')
-                field_value = field.get_attribute('value')
-                st.info(f"  Spinbutton {i}: id='{field_id}', class='{field_class}', value='{field_value}'")
-                
-        except Exception as debug_e:
-            st.error(f"Debug info failed: {debug_e}")
-        
+        st.error(f"Error adding fee: {e}")
         screenshot_name = f"error_add_fee_{int(time.time())}.png"
         driver.save_screenshot(screenshot_name)
-        st.warning(f"📷 Screenshot saved: {screenshot_name}")
+        return False
 
-
-
-
-# -------------------------------
-# Close driver safely
-# -------------------------------
 def close_driver():
     if "driver" in st.session_state:
         try:
@@ -370,166 +280,119 @@ def close_driver():
         del st.session_state["driver"]
         st.session_state["logged_in"] = False
 
-# -------------------------------
-# Streamlit UI
-# -------------------------------
-st.title("Veracore OMS Invoice Charges")
+# Streamlit UI - Simplified
+st.title("🚚 Veracore OMS Fee Entry")
 
-# Add a sidebar for better organization
-with st.sidebar:
-    st.header("Connection Settings")
-    veracore_url = st.text_input("3PLWHS URL", value="https://wms.3plwinner.com/VeraCore")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    system_id = st.text_input("System ID")
+# Initialize session state
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+# Connection Section
+if not st.session_state.get("logged_in"):
+    st.subheader("Connect to Veracore")
     
-    if st.button("🔌 Login and Connect"):
-        if not (username and password and system_id):
-            st.warning("Please enter all fields: username, password, and system ID.")
-        else:
-            with st.spinner("Connecting to Veracore OMS..."):
-                try:
-                    # Close existing driver if any
-                    close_driver()
-                    
-                    driver = setup_selenium_driver()
-                    login_and_select_system(driver, veracore_url, username, password, system_id)
-                    
-                    st.session_state["driver"] = driver
-                    st.session_state["logged_in"] = True
-                    st.session_state["system_id"] = system_id
-                    st.success(f"✅ Connected to system {system_id}")
-                    
-                except Exception as e:
-                    st.error(f"❌ Connection failed: {str(e)}")
-                    close_driver()
-    
-    if st.session_state.get("logged_in"):
+    with st.form("login_form"):
+        url = st.text_input("Veracore URL", value="https://wms.3plwinner.com/VeraCore")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        system_id = st.text_input("System ID")
+        
+        if st.form_submit_button("🔌 Connect", use_container_width=True):
+            if all([url, username, password, system_id]):
+                with st.spinner("Connecting..."):
+                    try:
+                        close_driver()
+                        driver = setup_selenium_driver()
+                        login_and_select_system(driver, url, username, password, system_id)
+                        
+                        st.session_state["driver"] = driver
+                        st.session_state["logged_in"] = True
+                        st.session_state["system_id"] = system_id
+                        st.success("✅ Connected!")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"❌ Connection failed: {str(e)}")
+                        close_driver()
+            else:
+                st.warning("Please fill in all fields")
+
+# Fee Entry Section
+else:
+    # Status bar
+    col_status, col_disconnect = st.columns([3, 1])
+    with col_status:
         st.success(f"🟢 Connected to system {st.session_state.get('system_id', 'Unknown')}")
+    with col_disconnect:
         if st.button("🔌 Disconnect"):
             close_driver()
-            st.success("Disconnected successfully")
             st.rerun()
 
-# Main content area
-if st.session_state.get("logged_in"):
-    st.header(f"Fee Entry for System {st.session_state['system_id']}")
+    st.subheader("Add Accessorial Fee")
     
-    col1, col2 = st.columns([2, 1])
+    # Main fee entry form
+    with st.form("fee_form"):
+        fee_type = st.selectbox("Fee Type", FEE_TYPES)
+        
+        col_qty, col_ref = st.columns(2)
+        with col_qty:
+            quantity = st.number_input("Quantity", min_value=1, value=1)
+        with col_ref:
+            reference_number = st.text_input("Reference Number")
+        
+        if st.form_submit_button("➕ Add Fee", use_container_width=True):
+            if not reference_number:
+                st.warning("Please enter a reference number")
+            else:
+                with st.spinner("Adding fee..."):
+                    try:
+                        wait = WebDriverWait(st.session_state["driver"], 30)
+                        success = add_fee(
+                            st.session_state["driver"],
+                            wait,
+                            fee_type,
+                            quantity,
+                            reference_number
+                        )
+                        if success:
+                            st.success(f"✅ Added: {fee_type} (Qty: {quantity}, Ref: {reference_number})")
+                    except Exception as e:
+                        st.error(f"❌ Failed to add fee: {str(e)}")
+
+    # Quick actions row
+    st.subheader("Quick Actions")
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        with st.form("fee_form"):
-            st.subheader("Add Accessorial Fee")
-            fee_type_selection = st.selectbox("Fee Type", FEE_TYPES, help="Select a fee type - only first 15 characters will be used for searching")
-            if fee_type_selection == "Custom Entry":
-                fee_type = st.text_input("Custom Fee Type", help="Enter fee type name - only first 15 characters will be used for searching")
-            else:
-                fee_type = fee_type_selection
-            col_qty, col_ref = st.columns(2)
-            with col_qty:
-                quantity = st.number_input("Quantity", min_value=1, value=1)
-            with col_ref:
-                reference_number = st.text_input("Reference Number")
-            
-            submit = st.form_submit_button("➕ Add Fee", use_container_width=True)
-
-            if submit:
-                if not fee_type or not reference_number:
-                    st.warning("Please enter both Fee Type and Reference Number")
+        if st.button("🎯 Open Fee Window", use_container_width=True):
+            try:
+                wait = WebDriverWait(st.session_state["driver"], 30)
+                success = open_accessorial_fee_window(st.session_state["driver"], wait)
+                if success:
+                    st.success("Window opened!")
                 else:
-                    with st.spinner("Adding fee..."):
-                        try:
-                            wait = WebDriverWait(st.session_state["driver"], 30)
-                            add_fee(
-                                st.session_state["driver"],
-                                wait,
-                                fee_type,
-                                quantity,
-                                reference_number
-                            )
-                            st.success(f"✅ Fee added successfully!")
-                            st.info(f"**Fee Type:** {fee_type}  \n**Quantity:** {quantity}  \n**Reference:** {reference_number}")
-                            
-                        except Exception as e:
-                            st.error(f"❌ Failed to add fee: {str(e)}")
+                    st.error("Failed to open window")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
     
     with col2:
-        st.subheader("Quick Actions")
-        
-        if st.button("🎯 Open Accessorial Window", use_container_width=True):
-            try:
-                with st.spinner("Testing accessorial fee button..."):
-                    wait = WebDriverWait(st.session_state["driver"], 30)
-                    success = open_accessorial_fee_window(st.session_state["driver"], wait)
-                    if success:
-                        st.success("Accessorial fee window opened!")
-                    else:
-                        st.error("Failed to open accessorial fee window")
-            except Exception as e:
-                    st.error(f"Error: {str(e)}")
-
-        st.subheader("Debug Tools")
-
-        if st.button("🔍 Check for Overlays"):
-            try:
-                driver = st.session_state["driver"]
-                overlays = driver.find_elements(By.XPATH, "//div[contains(@class, 'x-mask') or contains(@class, 'mask') or contains(@class, 'overlay')]")
-                
-                if overlays:
-                    st.warning(f"Found {len(overlays)} overlay/mask elements:")
-                    for i, overlay in enumerate(overlays):
-                        try:
-                            overlay_class = overlay.get_attribute("class")
-                            overlay_style = overlay.get_attribute("style")
-                            is_displayed = overlay.is_displayed()
-                            st.text(f"Overlay {i}: class='{overlay_class}', displayed={is_displayed}")
-                            if "display: none" not in overlay_style and is_displayed:
-                                st.error(f"Active overlay blocking clicks: {overlay_class}")
-                        except:
-                            st.text(f"Overlay {i}: Could not get details")
-                else:
-                    st.success("No overlays/masks found!")
-                    
-            except Exception as e:
-                st.error(f"Overlay check failed: {e}")
-
-                
-        if st.button("🔄 Refresh OMS Page"):
+        if st.button("🔄 Refresh Page", use_container_width=True):
             try:
                 st.session_state["driver"].refresh()
-                time.sleep(5)  # Wait for page to reload
+                time.sleep(5)
                 st.success("Page refreshed")
             except Exception as e:
                 st.error(f"Failed to refresh: {e}")
-                
-        if st.button("📷 Take Screenshot"):
+    
+    with col3:
+        if st.button("📷 Screenshot", use_container_width=True):
             try:
                 timestamp = int(time.time())
                 screenshot_path = f"screenshot_{timestamp}.png"
                 st.session_state["driver"].save_screenshot(screenshot_path)
-                st.success(f"Screenshot saved: {screenshot_path}")
+                st.success(f"Saved: {screenshot_path}")
             except Exception as e:
                 st.error(f"Screenshot failed: {e}")
-
-else:
-    st.info("👈 Please connect to Veracore OMS using the sidebar to start adding fees.")
-    
-    with st.expander("ℹ️ How to use this tool"):
-        st.markdown("""
-        1. **Connect**: Enter your Veracore URL, credentials, and system ID in the sidebar
-        2. **Login**: Click "Login and Connect" to establish connection
-        3. **Auto-Open**: The accessorial fee window will open automatically after login
-        4. **Add Fees**: Use the fee entry form to add accessorial fees
-        5. **Debug**: Use the debug tools if you encounter issues
-        
-        **Features**:
-        - Automatically opens accessorial fee window upon login
-        - Comprehensive field detection with multiple fallback strategies
-        - Real-time feedback during fee addition process
-        - Debug tools to inspect page elements
-        - Automatic screenshot capture on errors
-        - **Smart Search**: Only types first 15 characters to show dropdown options
-        """)
 
 # Cleanup on app shutdown
 if st.session_state.get("driver"):
