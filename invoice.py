@@ -79,14 +79,12 @@ FEE_TYPES = [
 # -------------------------------
 def setup_selenium_driver():
     chrome_options = Options()
-    chrome_options.add_argument("--headless")  # run headless
-    chrome_options.add_argument("--no-sandbox")  # required in many Linux containers
-    chrome_options.add_argument("--disable-dev-shm-usage")  # avoid /dev/shm issues
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+
+    chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--start-maximized")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
-
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
