@@ -7,6 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 import time
 
 
@@ -77,11 +78,15 @@ FEE_TYPES = [
 # Selenium setup
 # -------------------------------
 def setup_selenium_driver():
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--start-maximized")
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # run headless
+    chrome_options.add_argument("--no-sandbox")  # required in many Linux containers
+    chrome_options.add_argument("--disable-dev-shm-usage")  # avoid /dev/shm issues
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--start-maximized")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
+
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
