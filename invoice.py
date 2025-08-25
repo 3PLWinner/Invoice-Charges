@@ -9,6 +9,7 @@ from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 import time
+import os
 
 FEE_TYPES = [
     "RCV - Shrink Wrap",
@@ -71,13 +72,19 @@ FEE_TYPES = [
     "PP - Document Holder",
     "PP - Box 12x6x4"
 ]
-
+binary_path = os.path.join(os.getcwd(), "chrlauncher-win64-stable-codecs-sync", "chrlauncher 2.6 (64-bit).exe")
 def setup_selenium_driver():
     chrome_options = Options()
+    chrome_options.binary_location = binary_path
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--start-maximized")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
+
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
