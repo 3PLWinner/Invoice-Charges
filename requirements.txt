@@ -1,6 +1,12 @@
 streamlit
+pandas
 opencv-python
 pyzbar
 selenium
 numpy
 webdriver-manager
+qrcode[pil]
+sqlite3
+plotly
+qrcode
+plotly
