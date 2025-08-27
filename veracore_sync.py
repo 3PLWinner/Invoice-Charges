@@ -29,8 +29,12 @@ def setup_selenium_driver():
     
     # Comment out custom binary for now - use system Chrome
     # chrome_options.binary_location = binary_path
-    
-    chrome_options.add_argument("--headless=new")
+    if st.checkbox("Show Browser (disable headless)", value=True):
+        pass  # don’t add --headless
+    else:
+        chrome_options.add_argument("--headless=new")
+
+    #chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
@@ -83,6 +87,7 @@ def open_accessorial_fee_window(driver, wait):
         if clicked:
             time.sleep(3)
             return True
+        
     except Exception as e:
         st.error(f"Failed to open fee window: {str(e)}")
         return False
@@ -171,7 +176,7 @@ def add_fee(driver, wait, fee_type, quantity, reference):
         
         fee_row.click()
         time.sleep(3)
-        
+
         try:
             qty_input = driver.switch_to.active_element
         except:
@@ -216,7 +221,7 @@ def add_fee(driver, wait, fee_type, quantity, reference):
         screenshot_name = f"error_add_fee_{int(time.time())}.png"
         driver.save_screenshot(screenshot_name)
         return False
-
+    
 # Database functions
 def get_pending_work_orders():
     """Get all work orders that haven't been synced to Veracore"""
@@ -249,6 +254,83 @@ def authenticate_user(username, password):
     result = cursor.fetchone()
     conn.close()
     return result
+
+def sync_single_order(order):
+    """Sync a single work order to Veracore"""
+    reference_numbers = json.loads(order['reference_numbers'])
+    fee_data = json.loads(order['fee_data'])
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        driver = st.session_state.driver
+        wait = WebDriverWait(driver, 30)
+        
+        total_fees = len(fee_data)
+        successful_fees = 0
+        
+        for i, fee in enumerate(fee_data):
+            # Update progress
+            progress = (i + 1) / total_fees
+            progress_bar.progress(progress)
+            status_text.text(f"Syncing fee {i+1}/{total_fees}: {fee['type']}")
+            
+            # Use the first reference number for each fee
+            reference = reference_numbers[0] if reference_numbers else order['barcode_data']
+            
+            success = add_fee(driver, wait, fee['type'], fee['quantity'], reference)
+            
+            if success:
+                successful_fees += 1
+                st.success(f"✅ Synced: {fee['type']} (Qty: {fee['quantity']})")
+            else:
+                st.error(f"❌ Failed: {fee['type']}")
+            
+            time.sleep(1)  # Brief pause between fees
+        
+        # Mark as synced if all fees were successful
+        if successful_fees == total_fees:
+            mark_work_order_synced(order['id'], True)
+            st.success(f"🎉 Work Order #{order['id']} fully synced! ({successful_fees}/{total_fees} fees)")
+        else:
+            st.warning(f"⚠️ Partial sync: {successful_fees}/{total_fees} fees synced")
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+    except Exception as e:
+        st.error(f"❌ Sync failed for WO #{order['id']}: {str(e)}")
+        progress_bar.empty()
+        status_text.empty()
+
+def sync_all_orders(pending_orders):
+    """Sync all pending orders"""
+    if pending_orders.empty:
+        st.info("No orders to sync")
+        return
+    
+    overall_progress = st.progress(0)
+    overall_status = st.empty()
+    
+    total_orders = len(pending_orders)
+    synced_orders = 0
+    
+    for idx, (_, order) in enumerate(pending_orders.iterrows()):
+        overall_progress.progress((idx + 1) / total_orders)
+        overall_status.text(f"Processing order {idx + 1}/{total_orders}: WO #{order['id']}")
+        
+        with st.expander(f"Syncing WO #{order['id']}", expanded=True):
+            sync_single_order(order)
+            synced_orders += 1
+        
+        time.sleep(2)  # Brief pause between orders
+    
+    overall_progress.empty()
+    overall_status.empty()
+    
+    st.balloons()
+    st.success(f"🎉 Bulk sync complete! Processed {synced_orders}/{total_orders} orders")
 
 # Initialize session states
 if "logged_in" not in st.session_state:
@@ -401,83 +483,6 @@ else:
                     with col3:
                         if st.button(f"🔄 Sync", key=f"sync_{order['id']}"):
                             sync_single_order(order)
-
-def sync_single_order(order):
-    """Sync a single work order to Veracore"""
-    reference_numbers = json.loads(order['reference_numbers'])
-    fee_data = json.loads(order['fee_data'])
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    try:
-        driver = st.session_state.driver
-        wait = WebDriverWait(driver, 30)
-        
-        total_fees = len(fee_data)
-        successful_fees = 0
-        
-        for i, fee in enumerate(fee_data):
-            # Update progress
-            progress = (i + 1) / total_fees
-            progress_bar.progress(progress)
-            status_text.text(f"Syncing fee {i+1}/{total_fees}: {fee['type']}")
-            
-            # Use the first reference number for each fee
-            reference = reference_numbers[0] if reference_numbers else order['barcode_data']
-            
-            success = add_fee(driver, wait, fee['type'], fee['quantity'], reference)
-            
-            if success:
-                successful_fees += 1
-                st.success(f"✅ Synced: {fee['type']} (Qty: {fee['quantity']})")
-            else:
-                st.error(f"❌ Failed: {fee['type']}")
-            
-            time.sleep(1)  # Brief pause between fees
-        
-        # Mark as synced if all fees were successful
-        if successful_fees == total_fees:
-            mark_work_order_synced(order['id'], True)
-            st.success(f"🎉 Work Order #{order['id']} fully synced! ({successful_fees}/{total_fees} fees)")
-        else:
-            st.warning(f"⚠️ Partial sync: {successful_fees}/{total_fees} fees synced")
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-    except Exception as e:
-        st.error(f"❌ Sync failed for WO #{order['id']}: {str(e)}")
-        progress_bar.empty()
-        status_text.empty()
-
-def sync_all_orders(pending_orders):
-    """Sync all pending orders"""
-    if pending_orders.empty:
-        st.info("No orders to sync")
-        return
-    
-    overall_progress = st.progress(0)
-    overall_status = st.empty()
-    
-    total_orders = len(pending_orders)
-    synced_orders = 0
-    
-    for idx, (_, order) in enumerate(pending_orders.iterrows()):
-        overall_progress.progress((idx + 1) / total_orders)
-        overall_status.text(f"Processing order {idx + 1}/{total_orders}: WO #{order['id']}")
-        
-        with st.expander(f"Syncing WO #{order['id']}", expanded=True):
-            sync_single_order(order)
-            synced_orders += 1
-        
-        time.sleep(2)  # Brief pause between orders
-    
-    overall_progress.empty()
-    overall_status.empty()
-    
-    st.balloons()
-    st.success(f"🎉 Bulk sync complete! Processed {synced_orders}/{total_orders} orders")
 
 # Show sync statistics
 if st.session_state.logged_in:

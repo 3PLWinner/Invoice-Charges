@@ -86,27 +86,12 @@ CUSTOMERS = {
     "VSO335": "Meriden International"
 }
 
+# Configure Streamlit page
 st.set_page_config(
     page_title="Warehouse Fee Entry", 
     layout="wide",
     initial_sidebar_state="collapsed"
 )
-
-# Make sure CUSTOMERS is available globally
-if 'CUSTOMERS' not in globals():
-    CUSTOMERS = {
-        "CUST001": "ABC Company",
-        "CUST002": "XYZ Corporation", 
-        "CUST003": "123 Industries",
-        "CUST004": "Demo Customer",
-        "CUST005": "Test Company",
-        "CUST006": "Sample Corp",
-        "CUST007": "Example LLC",
-        "CUST008": "Demo Industries",
-        "CUST009": "Test Logistics",
-        "CUST010": "Warehouse Co",
-        "VSO335": "Meriden International"
-    }
 
 # Database functions
 def init_database():
@@ -156,32 +141,38 @@ def init_database():
     conn.commit()
     conn.close()
 
-def save_work_order(customer_id, customer_name, reference_numbers, fee_data, created_by):
+def save_work_order(customer_id, customer_name, reference_numbers, fee_data, created_by, notes=""):
     """Save a new work order to the database"""
     conn = sqlite3.connect('warehouse_system.db')
     cursor = conn.cursor()
     
-    # Generate barcode data
+    # Generate barcode data with work order ID
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     
     cursor.execute('''
         INSERT INTO work_orders 
-        (customer_id, customer_name, reference_numbers, fee_data, date_created, barcode_data, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (customer_id, customer_name, reference_numbers, fee_data, date_created, barcode_data, created_by, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         customer_id,
         customer_name,
         json.dumps(reference_numbers),
         json.dumps(fee_data),
         datetime.now().isoformat(),
-        f"WO-{timestamp}",
-        created_by
+        f"WO-{timestamp}",  # Temporary barcode, will update with ID
+        created_by,
+        notes
     ))
     
     work_order_id = cursor.lastrowid
+    
+    # Update barcode with actual work order ID
+    barcode_data = f"WO-{work_order_id}-{timestamp}"
+    cursor.execute("UPDATE work_orders SET barcode_data = ? WHERE id = ?", (barcode_data, work_order_id))
+    
     conn.commit()
     conn.close()
-    return work_order_id, f"WO-{work_order_id}-{timestamp}"
+    return work_order_id, barcode_data
 
 def authenticate_user(username, password):
     """Simple user authentication"""
@@ -191,6 +182,32 @@ def authenticate_user(username, password):
     result = cursor.fetchone()
     conn.close()
     return result
+
+def get_work_order_stats():
+    """Get work order statistics"""
+    conn = sqlite3.connect('warehouse_system.db')
+    
+    # Get today's stats
+    today = datetime.now().date()
+    today_orders = pd.read_sql_query(
+        "SELECT COUNT(*) as count FROM work_orders WHERE DATE(date_created) = ?", 
+        conn, params=[today.isoformat()]
+    ).iloc[0]['count']
+    
+    # Get pending orders
+    pending_orders = pd.read_sql_query(
+        "SELECT COUNT(*) as count FROM work_orders WHERE status = 'pending'", 
+        conn
+    ).iloc[0]['count']
+    
+    # Get total orders
+    total_orders = pd.read_sql_query(
+        "SELECT COUNT(*) as count FROM work_orders", 
+        conn
+    ).iloc[0]['count']
+    
+    conn.close()
+    return today_orders, pending_orders, total_orders
 
 # Initialize database
 init_database()
@@ -202,21 +219,25 @@ if "username" not in st.session_state:
     st.session_state.username = ""
 if "role" not in st.session_state:
     st.session_state.role = ""
+if "fee_entries" not in st.session_state:
+    st.session_state.fee_entries = []
+if "show_success" not in st.session_state:
+    st.session_state.show_success = False
 
 # Login Screen
 if not st.session_state.logged_in:
     st.title("🏭 Warehouse Management System")
     st.subheader("Login")
     
-    with st.form("login_form"):
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.write("**Default Users:**")
-            st.write("• admin / admin123")
-            st.write("• worker1 / worker123") 
-            st.write("• accounting / acc123")
-        
-        with col2:
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.write("**Default Users:**")
+        st.write("• admin / admin123")
+        st.write("• worker1 / worker123") 
+        st.write("• accounting / acc123")
+    
+    with col2:
+        with st.form("login_form"):
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
             
@@ -249,103 +270,122 @@ else:
             st.session_state.logged_in = False
             st.session_state.username = ""
             st.session_state.role = ""
+            st.session_state.fee_entries = []
+            st.session_state.show_success = False
             st.rerun()
+
+    # Show success message if work order was just created
+    if st.session_state.show_success:
+        st.success("✅ Work Order created successfully!")
+        st.session_state.show_success = False
 
     # Main fee entry form
     st.subheader("Create New Work Order")
     
-    with st.form("work_order_form", clear_on_submit=True):
-        # Customer selection
-        col1, col2 = st.columns(2)
+    # Customer selection
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Customer Selection**")
+        selection_method = st.radio("Method", ["Dropdown", "Scan/Manual Entry"], horizontal=True)
         
-        with col1:
-            st.write("**Customer Selection**")
-            selection_method = st.radio("Method", ["Dropdown", "Scan/Manual Entry"], horizontal=True)
-            
-            if selection_method == "Dropdown":
-                customer_options = [f"{k} - {v}" for k, v in CUSTOMERS.items()]
-                selected = st.selectbox("Select Customer", [""] + customer_options)
-                if selected:
-                    customer_id = selected.split(" - ")[0]
-                    customer_name = selected.split(" - ")[1]
-                else:
-                    customer_id = customer_name = ""
+        if selection_method == "Dropdown":
+            customer_options = [f"{k} - {v}" for k, v in CUSTOMERS.items()]
+            selected = st.selectbox("Select Customer", [""] + customer_options)
+            if selected:
+                customer_id = selected.split(" - ")[0]
+                customer_name = selected.split(" - ")[1]
             else:
-                scanned_id = st.text_input("Customer ID (scan or type)")
-                customer_id = scanned_id
-                customer_name = CUSTOMERS.get(scanned_id, scanned_id) if scanned_id else ""
-                if customer_name and customer_name != scanned_id:
-                    st.success(f"✅ Found: {customer_name}")
-                elif scanned_id and customer_name == scanned_id:
-                    st.warning("⚠️ Customer not in database - will use ID as name")
+                customer_id = customer_name = ""
+        else:
+            scanned_id = st.text_input("Customer ID (scan or type)")
+            customer_id = scanned_id
+            customer_name = CUSTOMERS.get(scanned_id, scanned_id) if scanned_id else ""
+            if customer_name and customer_name != scanned_id:
+                st.success(f"✅ Found: {customer_name}")
+            elif scanned_id and customer_name == scanned_id:
+                st.warning("⚠️ Customer not in database - will use ID as name")
+    
+    with col2:
+        st.write("**Reference Numbers**")
+        ref_input_method = st.radio("Input Method", ["Individual Entry", "Bulk Entry"], horizontal=True)
         
-        with col2:
-            st.write("**Reference Numbers**")
-            ref_input_method = st.radio("Input Method", ["Individual Entry", "Bulk Entry"], horizontal=True)
-            
-            reference_numbers = []
-            if ref_input_method == "Individual Entry":
-                num_refs = st.number_input("Number of References", min_value=1, max_value=10, value=1)
-                for i in range(int(num_refs)):
-                    ref = st.text_input(f"Reference #{i+1}", key=f"ref_{i}")
-                    if ref:
-                        reference_numbers.append(ref)
-            else:
-                bulk_refs = st.text_area("Enter references (one per line)", height=100)
-                if bulk_refs:
-                    reference_numbers = [ref.strip() for ref in bulk_refs.split('\n') if ref.strip()]
+        reference_numbers = []
+        if ref_input_method == "Individual Entry":
+            num_refs = st.number_input("Number of References", min_value=1, max_value=10, value=1)
+            for i in range(int(num_refs)):
+                ref = st.text_input(f"Reference #{i+1}", key=f"ref_{i}")
+                if ref:
+                    reference_numbers.append(ref)
+        else:
+            bulk_refs = st.text_area("Enter references (one per line)", height=100)
+            if bulk_refs:
+                reference_numbers = [ref.strip() for ref in bulk_refs.split('\n') if ref.strip()]
 
-        # Fee selection
-        st.write("**Fee Selection**")
+    # Fee selection section
+    st.write("**Fee Selection**")
+    
+    # Add new fee
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        fee_type = st.selectbox("Fee Type", [""] + FEE_TYPES, key="new_fee_type")
+    with col2:
+        fee_quantity = st.number_input("Quantity", min_value=1, value=1, key="new_fee_qty")
+    with col3:
+        if st.button("➕ Add Fee") and fee_type:
+            st.session_state.fee_entries.append({
+                'type': fee_type,
+                'quantity': fee_quantity
+            })
+            st.rerun()
+    
+    # Display current fees
+    if st.session_state.fee_entries:
+        st.write("**Selected Fees:**")
+        fees_to_remove = []
         
-        # Initialize fee data storage
-        if 'fee_entries' not in st.session_state:
-            st.session_state.fee_entries = []
+        for i, fee in enumerate(st.session_state.fee_entries):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"• {fee['type']}")
+            with col2:
+                st.write(f"Qty: {fee['quantity']}")
+            with col3:
+                if st.button("🗑️ Remove", key=f"remove_{i}"):
+                    fees_to_remove.append(i)
         
-        # Add fee entry section
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            fee_type = st.selectbox("Fee Type", [""] + FEE_TYPES, key="new_fee_type")
-        with col2:
-            fee_quantity = st.number_input("Quantity", min_value=1, value=1, key="new_fee_qty")
-        with col3:
-            if st.form_submit_button("➕ Add Fee") and fee_type:
-                st.session_state.fee_entries.append({
-                    'type': fee_type,
-                    'quantity': fee_quantity
-                })
+        # Remove fees marked for removal
+        for idx in reversed(fees_to_remove):
+            st.session_state.fee_entries.pop(idx)
         
-        # Display added fees
-        if st.session_state.fee_entries:
-            st.write("**Selected Fees:**")
-            for i, fee in enumerate(st.session_state.fee_entries):
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    st.write(fee['type'])
-                with col2:
-                    st.write(f"Qty: {fee['quantity']}")
-                with col3:
-                    if st.form_submit_button(f"🗑️", key=f"remove_{i}"):
-                        st.session_state.fee_entries.pop(i)
-                        st.rerun()
+        if fees_to_remove:
+            st.rerun()
 
-        # Date
+    # Additional fields
+    col1, col2 = st.columns(2)
+    with col1:
         fee_date = st.date_input("Fee Date", value=datetime.now().date())
-        
-        # Notes
-        notes = st.text_area("Notes (optional)", height=100)
-        
-        # Submit work order
-        submitted = st.form_submit_button("🚀 Create Work Order", use_container_width=True, type="primary")
-        
-        if submitted:
+    with col2:
+        st.write("")  # Spacer
+
+    notes = st.text_area("Notes (optional)", height=100)
+
+    # Submit button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🚀 Create Work Order", use_container_width=True, type="primary"):
             # Validation
+            errors = []
             if not customer_id:
-                st.error("Please select or enter a customer")
-            elif not reference_numbers:
-                st.error("Please enter at least one reference number")
-            elif not st.session_state.fee_entries:
-                st.error("Please add at least one fee")
+                errors.append("Please select or enter a customer")
+            if not reference_numbers:
+                errors.append("Please enter at least one reference number")
+            if not st.session_state.fee_entries:
+                errors.append("Please add at least one fee")
+            
+            if errors:
+                for error in errors:
+                    st.error(error)
             else:
                 # Save work order
                 try:
@@ -354,7 +394,8 @@ else:
                         customer_name,
                         reference_numbers,
                         st.session_state.fee_entries,
-                        st.session_state.username
+                        st.session_state.username,
+                        notes
                     )
                     
                     # Generate QR code
@@ -377,8 +418,10 @@ else:
                         st.write(f"**ID:** {work_order_id}")
                         st.write(f"**Customer:** {customer_name} ({customer_id})")
                         st.write(f"**References:** {', '.join(reference_numbers)}")
-                        st.write(f"**Fees:** {len(st.session_state.fee_entries)} items")
                         st.write(f"**Date:** {fee_date}")
+                        st.write("**Fees:**")
+                        for fee in st.session_state.fee_entries:
+                            st.write(f"  • {fee['type']} (Qty: {fee['quantity']})")
                         if notes:
                             st.write(f"**Notes:** {notes}")
                     
@@ -387,8 +430,9 @@ else:
                         st.image(buf.getvalue(), width=300)
                         st.code(barcode_data, language="text")
                     
-                    # Clear the form
+                    # Clear the form for next entry
                     st.session_state.fee_entries = []
+                    st.session_state.show_success = True
                     
                 except Exception as e:
                     st.error(f"Error creating work order: {str(e)}")
@@ -397,45 +441,57 @@ else:
     if st.session_state.role in ['admin', 'accounting']:
         st.subheader("Quick Stats")
         
-        conn = sqlite3.connect('warehouse_system.db')
-        
-        # Get today's stats
-        today = datetime.now().date()
-        today_orders = pd.read_sql_query(
-            "SELECT COUNT(*) as count FROM work_orders WHERE DATE(date_created) = ?", 
-            conn, params=[today]
-        ).iloc[0]['count']
-        
-        # Get pending orders
-        pending_orders = pd.read_sql_query(
-            "SELECT COUNT(*) as count FROM work_orders WHERE status = 'pending'", 
-            conn
-        ).iloc[0]['count']
-        
-        # Get total orders
-        total_orders = pd.read_sql_query(
-            "SELECT COUNT(*) as count FROM work_orders", 
-            conn
-        ).iloc[0]['count']
-        
-        conn.close()
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Today's Orders", today_orders)
-        with col2:
-            st.metric("Pending Orders", pending_orders)
-        with col3:
-            st.metric("Total Orders", total_orders)
+        try:
+            today_orders, pending_orders, total_orders = get_work_order_stats()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Today's Orders", today_orders)
+            with col2:
+                st.metric("Pending Orders", pending_orders)
+            with col3:
+                st.metric("Total Orders", total_orders)
+        except Exception as e:
+            st.warning(f"Could not load stats: {e}")
 
-    # Navigation to other apps
+    # Navigation section
     st.subheader("Navigation")
     col1, col2 = st.columns(2)
     
     with col1:
         if st.button("📊 View Accounting Dashboard", use_container_width=True):
-            st.info("Open accounting_app.py on port 8502")
+            st.info("💡 To access accounting dashboard, run: `streamlit run accounting_app.py --server.port 8502`")
     
     with col2:
         if st.button("🔄 Sync with Veracore", use_container_width=True):
-            st.info("Open veracore_sync.py on port 8503")
+            st.info("💡 To access Veracore sync, run: `streamlit run veracore_sync.py --server.port 8503`")
+
+    # Debug section for admins
+    if st.session_state.role == 'admin':
+        with st.expander("🔧 Debug Information"):
+            st.write("**Session State:**")
+            st.write(f"- Logged in: {st.session_state.logged_in}")
+            st.write(f"- Username: {st.session_state.username}")
+            st.write(f"- Role: {st.session_state.role}")
+            st.write(f"- Fee entries: {len(st.session_state.fee_entries)}")
+            
+            if st.button("Clear Fee Entries"):
+                st.session_state.fee_entries = []
+                st.rerun()
+            
+            if st.button("View Database Tables"):
+                try:
+                    conn = sqlite3.connect('warehouse_system.db')
+                    tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
+                    st.write("Tables:", tables)
+                    
+                    # Show recent work orders
+                    recent_orders = pd.read_sql_query(
+                        "SELECT id, customer_name, date_created, status FROM work_orders ORDER BY id DESC LIMIT 5", 
+                        conn
+                    )
+                    st.write("Recent Work Orders:")
+                    st.dataframe(recent_orders)
+                    conn.close()
+                except Exception as e:
+                    st.error(f"Database error: {e}")
