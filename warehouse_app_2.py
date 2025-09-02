@@ -8,7 +8,6 @@ import json
 from datetime import datetime
 import time
 
-
 # Your existing fee types from the Veracore script
 FEE_TYPES = [
     "RCV - Shrink Wrap",
@@ -97,11 +96,11 @@ st.set_page_config(
 
 # Database functions
 def init_database():
-    """Initialize the SQLite database"""
+    """Initialize the SQLite database safely, adding missing columns if needed."""
     conn = sqlite3.connect('warehouse_system.db')
     cursor = conn.cursor()
     
-    # Create work orders table - UPDATED to include fee_date
+    # Create work_orders table if it doesn't exist (basic schema)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS work_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,7 +108,6 @@ def init_database():
             customer_name TEXT NOT NULL,
             reference_numbers TEXT NOT NULL,
             fee_data TEXT NOT NULL,
-            fee_date DATE NOT NULL,
             date_created DATETIME NOT NULL,
             barcode_data TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
@@ -120,9 +118,11 @@ def init_database():
         )
     ''')
     
-    # Check if fee_date column exists, add it if it doesn't (for existing databases)
+    # Check existing columns
     cursor.execute("PRAGMA table_info(work_orders)")
     columns = [column[1] for column in cursor.fetchall()]
+    
+    # Add missing columns
     if 'fee_date' not in columns:
         cursor.execute("ALTER TABLE work_orders ADD COLUMN fee_date DATE")
     
@@ -150,8 +150,9 @@ def init_database():
     conn.commit()
     conn.close()
 
+
 def save_work_order(customer_id, customer_name, reference_numbers, fee_data, fee_date, created_by, notes=""):
-    """Save a new work order to the database - UPDATED to include fee_date"""
+    """Save a new work order to the database with customer_id for web scraping access"""
     conn = sqlite3.connect('warehouse_system.db')
     cursor = conn.cursor()
     
@@ -167,7 +168,7 @@ def save_work_order(customer_id, customer_name, reference_numbers, fee_data, fee
         customer_name,
         json.dumps(reference_numbers),
         json.dumps(fee_data),
-        fee_date.isoformat(),  # Store fee_date as ISO format string
+        fee_date.isoformat(),
         datetime.now().isoformat(),
         f"WO-{timestamp}",  # Temporary barcode, will update with ID
         created_by,
@@ -220,10 +221,10 @@ def get_work_order_stats():
     return today_orders, pending_orders, total_orders
 
 def get_work_orders_for_sync():
-    """Get work orders that need to be synced with Veracore - UPDATED to include fee_date"""
+    """Get work orders that need to be synced with Veracore - customer_id available for web scraping"""
     conn = sqlite3.connect('warehouse_system.db')
     
-    # Get pending work orders with all necessary data including fee_date
+    # Get pending work orders with customer_id for web scraping script
     work_orders = pd.read_sql_query('''
         SELECT id, customer_id, customer_name, reference_numbers, fee_data, fee_date,
                date_created, barcode_data, created_by, notes
@@ -234,16 +235,16 @@ def get_work_orders_for_sync():
     
     conn.close()
     
-    # Parse JSON fields and return structured data
+    # Parse JSON fields and return structured data with customer_id for web scraping
     sync_data = []
     for _, row in work_orders.iterrows():
         sync_data.append({
             'work_order_id': row['id'],
-            'customer_id': row['customer_id'],
+            'customer_id': row['customer_id'],  # This will be used by your web scraping script
             'customer_name': row['customer_name'],
             'reference_numbers': json.loads(row['reference_numbers']),
             'fee_data': json.loads(row['fee_data']),
-            'fee_date': row['fee_date'],  # Include fee_date in sync data
+            'fee_date': row['fee_date'],
             'date_created': row['date_created'],
             'barcode_data': row['barcode_data'],
             'created_by': row['created_by'],
@@ -404,7 +405,7 @@ else:
         if fees_to_remove:
             st.rerun()
 
-    # Additional fields - MOVED fee_date to be more prominent
+    # Additional fields
     st.write("**Fee Details**")
     col1, col2 = st.columns(2)
     with col1:
@@ -431,16 +432,16 @@ else:
                 for error in errors:
                     st.error(error)
             else:
-                # Save work order - UPDATED to include fee_date
+                # Save work order with customer_id for web scraping
                 try:
                     work_order_id, barcode_data = save_work_order(
                         customer_id,
                         customer_name,
                         reference_numbers,
                         st.session_state.fee_entries,
-                        fee_date,  # Pass the fee_date
+                        fee_date,
                         st.session_state.username,
-                        notes
+                        notes=notes
                     )
                     
                     # Generate QR code
@@ -463,7 +464,7 @@ else:
                         st.write(f"**ID:** {work_order_id}")
                         st.write(f"**Customer:** {customer_name} ({customer_id})")
                         st.write(f"**References:** {', '.join(reference_numbers)}")
-                        st.write(f"**Fee Date:** {fee_date.strftime('%B %d, %Y')}")  # Display fee_date
+                        st.write(f"**Fee Date:** {fee_date.strftime('%B %d, %Y')}")
                         st.write("**Fees:**")
                         for fee in st.session_state.fee_entries:
                             st.write(f"  • {fee['type']} (Qty: {fee['quantity']})")
@@ -530,9 +531,9 @@ else:
                     tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
                     st.write("Tables:", tables)
                     
-                    # Show recent work orders - UPDATED to include fee_date
+                    # Show recent work orders with customer_id for web scraping reference
                     recent_orders = pd.read_sql_query(
-                        "SELECT id, customer_name, fee_date, date_created, status FROM work_orders ORDER BY id DESC LIMIT 5", 
+                        "SELECT id, customer_id, customer_name, fee_date, date_created, status FROM work_orders ORDER BY id DESC LIMIT 5", 
                         conn
                     )
                     st.write("Recent Work Orders:")
@@ -546,7 +547,7 @@ else:
                 try:
                     sync_data = get_work_orders_for_sync()
                     if sync_data:
-                        st.write("**Sample work order data that will be sent to Veracore:**")
+                        st.write("**Sample work order data that will be sent to Veracore (includes customer_id for web scraping):**")
                         st.json(sync_data[0] if sync_data else {})
                     else:
                         st.write("No pending work orders to sync")
