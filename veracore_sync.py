@@ -34,11 +34,11 @@ def setup_selenium_driver():
     
     # Comment out custom binary for now - use system Chrome
     # chrome_options.binary_location = binary_path
-    if st.checkbox("Show Browser (disable headless)", value=True):
-        pass  # don't add --headless
-    else:
-        chrome_options.add_argument("--headless=new")
-
+    #if st.checkbox("Show Browser (disable headless)", value=True):
+        #pass  # don't add --headless
+    #else:
+        
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
