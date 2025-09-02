@@ -48,21 +48,7 @@ def setup_selenium_driver():
     chrome_options.add_experimental_option('useAutomationExtension', False)
 
     # Try multiple approaches to get working driver
-    try:
-        # Method 1: Try ChromeDriverManager with newer version
-        from webdriver_manager.chrome import ChromeDriverManager
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    except Exception as e1:
-        try:
-            # Method 2: Use system chromedriver (if installed)
-            driver = webdriver.Chrome(options=chrome_options)
-        except Exception as e2:
-            # Method 3: Manual driver path (user needs to download)
-            st.error(f"Chrome driver issues. Please install chromedriver manually or use Method 2 below.")
-            st.error(f"Error 1: {e1}")
-            st.error(f"Error 2: {e2}")
-            raise Exception("Could not initialize Chrome driver")
-    
+    driver = webdriver.Chrome(options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 
