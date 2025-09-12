@@ -1,9 +1,9 @@
 # accounting_app.py - Accounting dashboard
 import streamlit as st
+import sqlite3
 import pandas as pd
 import json
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, text
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -12,48 +12,36 @@ st.set_page_config(
     layout="wide"
 )
 
-SQL_SERVER="3PLWIN-SERVER\\WINNERSQLDEV"
-SQL_DATABASE="WarehouseSystem"
-
-SQL_USERNAME="sa"
-SQL_PASSWORD="$!SQL_d3v!$"
-
-ENGINE = create_engine(
-    f"mssql+pyodbc://{SQL_USERNAME}:{SQL_PASSWORD}@{SQL_SERVER}/{SQL_DATABASE}"
-    "?driver=ODBC+Driver+17+for+SQL+Server"
-)
-
-
 def authenticate_user(username, password):
     """Simple user authentication"""
-    sql =text("""
-        SELECT username, role 
-        FROM users 
-        WHERE username = :u AND password = :p
-    """)
-    with ENGINE.connect() as conn:
-        row = conn.execute(sql, {"u": username, "p": password}).fetchone()
-    return row
+    conn = sqlite3.connect('warehouse_system.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, role FROM users WHERE username = ? AND password = ?", (username, password))
+    result = cursor.fetchone()
+    conn.close()
+    return result
 
 def load_work_orders():
     """Load all work orders from database"""
-    sql = """
-        SELECT *
-        FROM work_orders
+    conn = sqlite3.connect('warehouse_system.db')
+    df = pd.read_sql_query("""
+        SELECT * FROM work_orders 
         ORDER BY date_created DESC
-    """
-    return pd.read_sql(sql,ENGINE)
+    """, conn)
+    conn.close()
+    return df
 
 def update_work_order_status(order_id, new_status):
     """Update work order status"""
-    sql = text("""
-        UPDATE work_orders
-        SET status = :status,
-               sync_date = :sync_date
-        WHERE id = :oid
-    """)
-    with ENGINE.begin() as conn:
-        conn.execute(sql, {"status": new_status, "sync_date": datetime.now(), "oid": order_id})
+    conn = sqlite3.connect('warehouse_system.db')
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE work_orders 
+        SET status = ?, sync_date = ?
+        WHERE id = ?
+    """, (new_status, datetime.now().isoformat(), order_id))
+    conn.commit()
+    conn.close()
 
 # Initialize session state
 if "logged_in" not in st.session_state:
@@ -263,7 +251,7 @@ else:
                 
                 st.write(f"**Veracore Synced:** {'Yes' if order['veracore_synced'] else 'No'}")
                 if order['sync_date']:
-                    sync_date = pd.to_datetime(order['sync_date'])  
+                    sync_date = datetime.fromisoformat(order['sync_date'])
                     st.write(f"**Last Sync:** {sync_date.strftime('%Y-%m-%d %H:%M')}")
             
             if show_details:

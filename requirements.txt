@@ -3,3 +3,8 @@ pandas
 qrcode[pil]
 selenium
 webdriver-manager
+psycopg2-binary
+pymssql
+plotly
+sqlalchemy
+pyodbc

@@ -1,6 +1,5 @@
 # veracore_sync.py - Modified to use 3plwhs system with customer ID input
 import streamlit as st
-import sqlite3
 import pandas as pd
 import json
 from datetime import datetime
@@ -15,6 +14,24 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 import time
 import os
+import pymssql
+
+
+DB_CONFIG = {
+    "server": "3PLWIN-SERVER\\WINNERSQLDEV",   # e.g. "localhost" or "192.168.1.10"
+    "user": "sa",
+    "password": "$!SQL_d3v!$",
+    "database": "WarehouseSystem"
+}
+
+def get_connection():
+    return pymssql.connect(
+        server=DB_CONFIG["server"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        database=DB_CONFIG["database"]
+    )
+
 
 VERACORE_URL = "https://wms.3plwinner.com/VeraCore"
 VERACORE_USER = "ljannatipour"
@@ -169,13 +186,18 @@ def input_system_id_in_fee_window(driver, wait, customer_name):
 
 # Add this function to create fee_date column if missing
 def update_database_schema():
-    conn = sqlite3.connect('warehouse_system.db')
+    conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(work_orders)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'fee_date' not in columns:
-        cursor.execute("ALTER TABLE work_orders ADD COLUMN fee_date TEXT")
+    cursor.execute('''
+                   SELECT COLUMN_NAME 
+                   FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_NAME = 'work_orders' AND COLUMN_NAME = 'fee_date'
+    ''')
+    result = cursor.fetchone()
+    if not result:
+        cursor.execute("ALTER TABLE work_orders ADD fee_date DATE")
         conn.commit()
+
     conn.close()
 
 def add_fee(driver, wait, fee_type, quantity, reference, fee_date=None, customer_name=None):
@@ -302,24 +324,25 @@ def add_fee(driver, wait, fee_type, quantity, reference, fee_date=None, customer
 # Database functions
 def get_pending_work_orders():
     """Get all work orders that haven't been synced to Veracore"""
-    conn = sqlite3.connect('warehouse_system.db')
-    df = pd.read_sql_query("""
+    conn = get_connection()
+    query = """
         SELECT * FROM work_orders 
         WHERE veracore_synced = 0 OR veracore_synced IS NULL
         ORDER BY date_created ASC
-    """, conn)
+    """
+    df = pd.read_sql_query(query, conn)
     conn.close()
     return df
 
 def mark_work_order_synced(order_id, success=True):
     """Mark a work order as synced to Veracore"""
-    conn = sqlite3.connect('warehouse_system.db')
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE work_orders 
-        SET veracore_synced = ?, sync_date = ?, status = ?
-        WHERE id = ?
-    """, (1 if success else 0, datetime.now().isoformat(), 'completed' if success else 'pending', order_id))
+        SET veracore_synced = %s, sync_date = %s, status = %s
+        WHERE id = %s
+    """, (1 if success else 0, datetime.now(), 'completed' if success else 'pending', order_id))
     conn.commit()
     conn.close()
 
@@ -331,7 +354,7 @@ def sync_single_order(order):
 
     fee_date = order.get('fee_date')
     if not fee_date:
-        fee_date = datetime.fromisoformat(order['date_created']).date()
+        fee_date = order['date_created'].date()
     else:
         if isinstance(fee_date, str):
             fee_date = datetime.strptime(fee_date, "%Y-%m-%d").date()
@@ -496,15 +519,16 @@ if st.session_state.veracore_connected:
         for idx, order in pending_orders.iterrows():
             reference_numbers = json.loads(order['reference_numbers'])
             fee_data = json.loads(order['fee_data'])
+            created_str = order['date_created'].strftime("%Y-%m-%d")
 
-            with st.expander(f"WO #{order['id']} - {order['customer_name']} (System ID: {order['customer_name']}) - {len(fee_data)} fees - {order['date_created'][:10]}"):
+            with st.expander(f"WO #{order['id']} - {order['customer_name']} (System ID: {order['customer_name']}) - {len(fee_data)} fees - {created_str}"):
                 col1, col2, col3 = st.columns([2, 2, 1])
 
                 with col1:
                     st.write(f"**Customer:** {order['customer_name']}")
                     st.write(f"**System ID Input:** {order['customer_name']}")
                     st.write(f"**References:** {', '.join(reference_numbers)}")
-                    st.write(f"**Created:** {order['date_created'][:16]}")
+                    st.write(f"**Created:** {created_str}")
                     st.write(f"**By:** {order['created_by']}")
 
                 with col2:
@@ -518,8 +542,8 @@ if st.session_state.veracore_connected:
 
 # Show sync statistics
 st.subheader("Sync Statistics")
-conn = sqlite3.connect('warehouse_system.db')
-stats = pd.read_sql_query("""
+conn = get_connection()
+stats = pd.read_sql("""
     SELECT 
         COUNT(*) as total_orders,
         SUM(CASE WHEN veracore_synced = 1 THEN 1 ELSE 0 END) as synced_orders,
@@ -527,12 +551,11 @@ stats = pd.read_sql_query("""
     FROM work_orders
 """, conn)
 
-recent_syncs = pd.read_sql_query("""
-    SELECT id, customer_name, customer_id, sync_date 
+recent_syncs = pd.read_sql("""
+    SELECT TOP 5 id, customer_name, customer_id, sync_date 
     FROM work_orders 
     WHERE veracore_synced = 1 AND sync_date IS NOT NULL
     ORDER BY sync_date DESC
-    LIMIT 5
 """, conn)
 conn.close()
 
@@ -548,7 +571,7 @@ if not stats.empty:
     if not recent_syncs.empty:
         st.subheader("Recent Sync Activity")
         for _, sync in recent_syncs.iterrows():
-            sync_time = datetime.fromisoformat(sync['sync_date'])
+            sync_time = sync['sync_date']
             st.write(f"• WO #{sync['id']} - {sync['customer_name']} (System ID: {sync['customer_name']}) - {sync_time.strftime('%Y-%m-%d %H:%M')}")
 
 # Cleanup function

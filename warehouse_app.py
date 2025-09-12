@@ -1,15 +1,21 @@
 # warehouse_app.py - Main warehouse worker interface
 import streamlit as st
-import sqlite3
+import pymssql
 import pandas as pd
 import qrcode
 from io import BytesIO
 import json
 from datetime import datetime
 import time
+import os
+
+SQL_SERVER="3PLWIN-SERVER\\WINNERSQLDEV"
+SQL_DATABASE="WarehouseSystem"
+
+SQL_USERNAME="sa"
+SQL_PASSWORD="$!SQL_d3v!$"
 
 
-# Your existing fee types from the Veracore script
 FEE_TYPES = [
     "RCV - Shrink Wrap",
     "RCV - Sorting",
@@ -72,71 +78,62 @@ FEE_TYPES = [
     "PP - Box 12x6x4"
 ]
 
-# Sample customers - replace with your actual customer data
 CUSTOMERS = {
-    "CUST001": "ABC Company",
-    "CUST002": "XYZ Corporation", 
-    "CUST003": "123 Industries",
-    "CUST004": "Demo Customer",
-    "CUST005": "Test Company",
-    "CUST006": "Sample Corp",
-    "CUST007": "Example LLC",
-    "CUST008": "Demo Industries",
-    "CUST009": "Test Logistics",
-    "CUST010": "Warehouse Co",
     "VSO335": "Meriden International",
     "CUS001": "3PLWINNER"
 }
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Warehouse Fee Entry", 
+    page_title="Warehouse Fee Entry",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
+def get_connection():
+    return pymssql.connect(server=SQL_SERVER,
+                           user=SQL_USERNAME,
+                           password=SQL_PASSWORD,
+                           database=SQL_DATABASE)
+
 # Database functions
 def init_database():
-    """Initialize the SQLite database"""
-    conn = sqlite3.connect('warehouse_system.db')
+    """Initialize the SQL Server database safely"""
+    conn = get_connection()
     cursor = conn.cursor()
-    
-    # Create work orders table - UPDATED to include fee_date
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS work_orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer_id TEXT NOT NULL,
-            customer_name TEXT NOT NULL,
-            reference_numbers TEXT NOT NULL,
-            fee_data TEXT NOT NULL,
-            fee_date DATE NOT NULL,
-            date_created DATETIME NOT NULL,
-            barcode_data TEXT NOT NULL,
-            status TEXT DEFAULT 'pending',
-            veracore_synced BOOLEAN DEFAULT 0,
-            sync_date DATETIME,
-            created_by TEXT,
-            notes TEXT
-        )
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='work_orders' AND xtype='U')
+        BEGIN
+            CREATE TABLE work_orders (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                customer_id NVARCHAR(50) NOT NULL,
+                customer_name NVARCHAR(100) NOT NULL,
+                reference_numbers NVARCHAR(MAX) NOT NULL,
+                fee_data NVARCHAR(MAX) NOT NULL,
+                date_created DATETIME NOT NULL,
+                barcode_data NVARCHAR(100) NOT NULL,
+                status NVARCHAR(50) DEFAULT 'pending',
+                veracore_synced BIT DEFAULT 0,
+                sync_date DATETIME NULL,
+                created_by NVARCHAR(100) NULL,
+                notes NVARCHAR(MAX) NULL,
+                fee_date DATE NULL
+            )
+        END
     ''')
-    
-    # Check if fee_date column exists, add it if it doesn't (for existing databases)
-    cursor.execute("PRAGMA table_info(work_orders)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'fee_date' not in columns:
-        cursor.execute("ALTER TABLE work_orders ADD COLUMN fee_date DATE")
-    
-    # Create users table for simple authentication
+
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT DEFAULT 'worker'
-        )
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
+        BEGIN
+            CREATE TABLE users (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                username NVARCHAR(50) UNIQUE NOT NULL,
+                password NVARCHAR(255) NOT NULL,
+                role NVARCHAR(50) DEFAULT 'worker'
+            )
+        END
     ''')
-    
-    # Insert default users if none exist
+
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
         default_users = [
@@ -145,96 +142,79 @@ def init_database():
             ('worker2', 'worker123', 'worker'),
             ('accounting', 'acc123', 'accounting')
         ]
-        cursor.executemany("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", default_users)
-    
+        cursor.executemany("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", default_users
+        )
     conn.commit()
     conn.close()
 
 def save_work_order(customer_id, customer_name, reference_numbers, fee_data, fee_date, created_by, notes=""):
-    """Save a new work order to the database - UPDATED to include fee_date"""
-    conn = sqlite3.connect('warehouse_system.db')
-    cursor = conn.cursor()
-    
-    # Generate barcode data with work order ID
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    
+    conn = get_connection()
+    cursor = conn.cursor()
+
     cursor.execute('''
         INSERT INTO work_orders 
         (customer_id, customer_name, reference_numbers, fee_data, fee_date, date_created, barcode_data, created_by, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     ''', (
         customer_id,
         customer_name,
         json.dumps(reference_numbers),
         json.dumps(fee_data),
-        fee_date.isoformat(),  # Store fee_date as ISO format string
-        datetime.now().isoformat(),
-        f"WO-{timestamp}",  # Temporary barcode, will update with ID
+        fee_date,
+        datetime.now(),
+        f"WO-{timestamp}",  # temporary barcode
         created_by,
         notes
     ))
-    
-    work_order_id = cursor.lastrowid
-    
-    # Update barcode with actual work order ID
+    conn.commit()
+    cursor.execute("SELECT SCOPE_IDENTITY()")
+    work_order_id = cursor.fetchone()[0]
+
     barcode_data = f"WO-{work_order_id}-{timestamp}"
-    cursor.execute("UPDATE work_orders SET barcode_data = ? WHERE id = ?", (barcode_data, work_order_id))
-    
+    cursor.execute("UPDATE work_orders SET barcode_data = %s WHERE id = %s", (barcode_data, work_order_id))
     conn.commit()
     conn.close()
     return work_order_id, barcode_data
 
 def authenticate_user(username, password):
-    """Simple user authentication"""
-    conn = sqlite3.connect('warehouse_system.db')
+    conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username, role FROM users WHERE username = ? AND password = ?", (username, password))
+    cursor.execute("SELECT username, role FROM users WHERE username = %s AND password = %s", (username, password))
     result = cursor.fetchone()
     conn.close()
-    return result
+    return (result[0], result[1]) if result else None
 
 def get_work_order_stats():
-    """Get work order statistics"""
-    conn = sqlite3.connect('warehouse_system.db')
-    
-    # Get today's stats
     today = datetime.now().date()
+    conn = get_connection()
+
     today_orders = pd.read_sql_query(
-        "SELECT COUNT(*) as count FROM work_orders WHERE DATE(date_created) = ?", 
-        conn, params=[today.isoformat()]
+        "SELECT COUNT(*) AS count FROM work_orders WHERE CAST(date_created AS DATE) = %s", conn, params=[today]
     ).iloc[0]['count']
-    
-    # Get pending orders
+
     pending_orders = pd.read_sql_query(
-        "SELECT COUNT(*) as count FROM work_orders WHERE status = 'pending'", 
-        conn
+        "SELECT COUNT(*) AS count FROM work_orders WHERE status = 'pending'", conn
     ).iloc[0]['count']
-    
-    # Get total orders
+
     total_orders = pd.read_sql_query(
-        "SELECT COUNT(*) as count FROM work_orders", 
-        conn
+        "SELECT COUNT(*) AS count FROM work_orders", conn
     ).iloc[0]['count']
-    
+
     conn.close()
     return today_orders, pending_orders, total_orders
 
 def get_work_orders_for_sync():
-    """Get work orders that need to be synced with Veracore - UPDATED to include fee_date"""
-    conn = sqlite3.connect('warehouse_system.db')
-    
-    # Get pending work orders with all necessary data including fee_date
+    conn = get_connection()
     work_orders = pd.read_sql_query('''
         SELECT id, customer_id, customer_name, reference_numbers, fee_data, fee_date,
-               date_created, barcode_data, created_by, notes
+                date_created, barcode_data, created_by, notes
         FROM work_orders 
-        WHERE status = 'pending' AND veracore_synced = 0
+        WHERE status = 'pending' AND veracore_synced=0
         ORDER BY date_created ASC
     ''', conn)
-    
     conn.close()
-    
-    # Parse JSON fields and return structured data
+
     sync_data = []
     for _, row in work_orders.iterrows():
         sync_data.append({
@@ -243,17 +223,21 @@ def get_work_orders_for_sync():
             'customer_name': row['customer_name'],
             'reference_numbers': json.loads(row['reference_numbers']),
             'fee_data': json.loads(row['fee_data']),
-            'fee_date': row['fee_date'],  # Include fee_date in sync data
+            'fee_date': row['fee_date'],
             'date_created': row['date_created'],
             'barcode_data': row['barcode_data'],
             'created_by': row['created_by'],
             'notes': row['notes']
         })
-    
     return sync_data
 
 # Initialize database
-init_database()
+try:
+    init_database()
+    db_connected = True
+except Exception as e:
+    db_connected = False
+    db_error = str(e)
 
 # Initialize session state
 if "logged_in" not in st.session_state:
@@ -266,6 +250,25 @@ if "fee_entries" not in st.session_state:
     st.session_state.fee_entries = []
 if "show_success" not in st.session_state:
     st.session_state.show_success = False
+
+
+# Database connection check
+if not db_connected:
+    st.error(f"🚨 Database Connection Failed: {db_error}")
+    st.stop()
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Login Screen
 if not st.session_state.logged_in:
@@ -286,18 +289,32 @@ if not st.session_state.logged_in:
             
             if st.form_submit_button("🔐 Login", use_container_width=True):
                 if username and password:
-                    user_data = authenticate_user(username, password)
-                    if user_data:
-                        st.session_state.logged_in = True
-                        st.session_state.username = user_data[0]
-                        st.session_state.role = user_data[1]
-                        st.success("Login successful!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("Invalid username or password")
+                    try:
+                        user_data = authenticate_user(username, password)
+                        if user_data:
+                            st.session_state.logged_in = True
+                            st.session_state.username = user_data[0]
+                            st.session_state.role = user_data[1]
+                            st.success("Login successful!")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("Invalid username or password")
+                    except Exception as e:
+                        st.error(f"Login error: {str(e)}")
                 else:
                     st.warning("Please enter both username and password")
+
+
+
+
+
+
+
+
+
+
+
 
 # Main Application
 else:
@@ -375,7 +392,7 @@ else:
     with col2:
         fee_quantity = st.number_input("Quantity", min_value=1, value=1, key="new_fee_qty")
     with col3:
-        if st.button("➕ Add Fee") and fee_type:
+        if st.button("Add Fee") and fee_type:
             st.session_state.fee_entries.append({
                 'type': fee_type,
                 'quantity': fee_quantity
@@ -394,7 +411,7 @@ else:
             with col2:
                 st.write(f"Qty: {fee['quantity']}")
             with col3:
-                if st.button("🗑️ Remove", key=f"remove_{i}"):
+                if st.button("Remove", key=f"remove_{i}"):
                     fees_to_remove.append(i)
         
         # Remove fees marked for removal
@@ -404,7 +421,7 @@ else:
         if fees_to_remove:
             st.rerun()
 
-    # Additional fields - MOVED fee_date to be more prominent
+    # Additional fields
     st.write("**Fee Details**")
     col1, col2 = st.columns(2)
     with col1:
@@ -431,16 +448,16 @@ else:
                 for error in errors:
                     st.error(error)
             else:
-                # Save work order - UPDATED to include fee_date
+                # Save work order with customer_id for web scraping
                 try:
                     work_order_id, barcode_data = save_work_order(
                         customer_id,
                         customer_name,
                         reference_numbers,
                         st.session_state.fee_entries,
-                        fee_date,  # Pass the fee_date
+                        fee_date,
                         st.session_state.username,
-                        notes
+                        notes=notes
                     )
                     
                     # Generate QR code
@@ -463,7 +480,7 @@ else:
                         st.write(f"**ID:** {work_order_id}")
                         st.write(f"**Customer:** {customer_name} ({customer_id})")
                         st.write(f"**References:** {', '.join(reference_numbers)}")
-                        st.write(f"**Fee Date:** {fee_date.strftime('%B %d, %Y')}")  # Display fee_date
+                        st.write(f"**Fee Date:** {fee_date.strftime('%B %d, %Y')}")
                         st.write("**Fees:**")
                         for fee in st.session_state.fee_entries:
                             st.write(f"  • {fee['type']} (Qty: {fee['quantity']})")
@@ -526,18 +543,22 @@ else:
             
             if st.button("View Database Tables"):
                 try:
-                    conn = sqlite3.connect('warehouse_system.db')
-                    tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table'", conn)
+                    conn = get_connection()
+                    tables = pd.read_sql_query('''
+                        SELECT TABLE_NAME
+                        FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_TYPE = 'BASE TABLE'
+                    ''', conn)
                     st.write("Tables:", tables)
                     
-                    # Show recent work orders - UPDATED to include fee_date
+                    # Show recent work orders with customer_id for web scraping reference
                     recent_orders = pd.read_sql_query(
-                        "SELECT id, customer_name, fee_date, date_created, status FROM work_orders ORDER BY id DESC LIMIT 5", 
+                        "SELECT TOP 5 id, customer_id, customer_name, fee_date, date_created, status FROM work_orders ORDER BY id DESC", 
                         conn
                     )
+                    conn.close()
                     st.write("Recent Work Orders:")
                     st.dataframe(recent_orders)
-                    conn.close()
                 except Exception as e:
                     st.error(f"Database error: {e}")
             
@@ -546,7 +567,7 @@ else:
                 try:
                     sync_data = get_work_orders_for_sync()
                     if sync_data:
-                        st.write("**Sample work order data that will be sent to Veracore:**")
+                        st.write("**Sample work order data that will be sent to Veracore (includes customer_id for web scraping):**")
                         st.json(sync_data[0] if sync_data else {})
                     else:
                         st.write("No pending work orders to sync")
