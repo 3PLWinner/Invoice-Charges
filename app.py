@@ -313,16 +313,16 @@ st.subheader("Work Order Notes (applies to entire work order)")
 if "work_order_notes" not in st.session_state:
     st.session_state["work_order_notes"] = ""
 
-audio_data = mic_recorder(key="mic_input")  # just show recorder
 
-notes_text = speech_to_text(key="mic_input_recorder", language="en")
+notes_text = speech_to_text(key="work_order_notes_mic", language="en")
 
 if notes_text is not None:
     st.session_state["work_order_notes"] = notes_text
 
 st.text_area(
     "Notes (dictated)",
-    key="work_order_notes",
+    value=st.session_state["work_order_notes"],
+    key="work_order_notes_area",
     height=150
 )
 
