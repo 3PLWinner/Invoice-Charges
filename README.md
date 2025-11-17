@@ -1,5 +1,5 @@
-# Work Order Import
-This script is used to automate adding accessorial fees for work orders
+# Digital Work Orders
+This script makes a digitalized work order that gets populated into an excel sheet.
 
 ## Table of Contents
 - [Usage](#usage)
