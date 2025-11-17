@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-import streamlit.components.v1 as components
-from streamlit_mic_recorder import mic_recorder, speech_to_text
 
 
 excel_file = 'master_work_orders.xlsx'
@@ -308,24 +306,60 @@ with tab3:
         st.info("No fees added yet.")
 
 
+
 st.subheader("Work Order Notes (applies to entire work order)")
 
 if "work_order_notes" not in st.session_state:
     st.session_state["work_order_notes"] = ""
 
-
-notes_text = speech_to_text(key="work_order_notes_mic", language="en")
-
-if notes_text is not None:
-    st.session_state["work_order_notes"] = notes_text
-
-st.text_area(
-    "Notes (dictated)",
-    value=st.session_state["work_order_notes"],
-    key="work_order_notes_area",
+notes_box = st.text_area(
+    "Notes:",
+    value=st.session_state.work_order_notes,
+    key="notes_area",
     height=150
 )
 
+st.session_state.work_order_notes = notes_box
+
+st.markdown("""
+<button id="micBtn" style="padding: 10px 15px; font-size: 16px;">
+🎤 Dictate Notes
+</button>
+<p id="status"></p>
+
+<script>
+var recognizing = false;
+var recognition = new (window.SpeechRecognition ||
+                       window.webkitSpeechRecognition)();
+
+recognition.continuous = true;
+recognition.interimResults = true;
+
+document.getElementById("micBtn").onclick = function() {
+    if (recognizing) {
+        recognition.stop();
+        recognizing = false;
+        document.getElementById("status").innerHTML = "Stopped.";
+    } else {
+        recognition.start();
+        recognizing = true;
+        document.getElementById("status").innerHTML = "Listening...";
+    }
+};
+
+recognition.onresult = function(event) {
+    let text = "";
+    for (var i = 0; i < event.results.length; ++i) {
+        text += event.results[i][0].transcript;
+    }
+
+    const textarea = document.querySelector("textarea[data-testid='stTextArea']");
+    textarea.value = text;
+
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+};
+</script>
+""", unsafe_allow_html=True)
 
 # Collect all fees from all tabs
 all_fees = st.session_state.receiving_fees + st.session_state.shipping_fees + st.session_state.crossdock_fees
