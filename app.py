@@ -287,7 +287,7 @@ with tab2:
 
 #CROSSDOCK TAB
 with tab3:
-    st.header("Crossdock Fees")
+    st.header("Crossdock Work Order")
 
     fee_type = st.selectbox("Select Fee", CROSSDOCK_FEES, key="crossdock_fee_select")
     quantity = st.number_input("Quantity", min_value=1, key="crossdock_qty")
@@ -325,8 +325,6 @@ st.text_area(
     key="work_order_notes_area",
     height=150
 )
-
-
 
 
 # Collect all fees from all tabs
