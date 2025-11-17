@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import streamlit.components.v1 as components
+from streamlit_mic_recorder import mic_recorder, speech_to_text
 
 
 excel_file = 'master_work_orders.xlsx'
@@ -198,10 +200,31 @@ if "shipping_fees" not in st.session_state:
     st.session_state.shipping_fees = []
 if "crossdock_fees" not in st.session_state:
     st.session_state.crossdock_fees = []
-
+if "work_order_notes" not in st.session_state:
+    st.session_state.work_order_notes = ""
 
 #UI
 st.title("Digital Work Order Form")
+
+speech_event = st.query_params.get("speech_event")
+
+st.markdown("""
+<script>
+window.addEventListener("message", (event) => {
+    if (event.data.type === "st_speech") {
+        const key = event.data.key;
+        const text = event.data.text;
+
+        // Update Streamlit component value
+        window.parent.postMessage(
+            { type: "streamlit:componentValue", id: key, data: text },
+            "*"
+        );
+    }
+});
+</script>
+""", unsafe_allow_html=True)
+
 
 st.subheader("Work Order Details")
 
@@ -285,6 +308,27 @@ with tab3:
         st.info("No fees added yet.")
 
 
+st.subheader("Work Order Notes (applies to entire work order)")
+
+if "work_order_notes" not in st.session_state:
+    st.session_state["work_order_notes"] = ""
+
+audio_data = mic_recorder(key="mic_input")  # just show recorder
+
+notes_text = speech_to_text(key="mic_input_recorder", language="en")
+
+if notes_text is not None:
+    st.session_state["work_order_notes"] = notes_text
+
+st.text_area(
+    "Notes (dictated)",
+    key="work_order_notes",
+    height=150
+)
+
+
+
+
 # Collect all fees from all tabs
 all_fees = st.session_state.receiving_fees + st.session_state.shipping_fees + st.session_state.crossdock_fees
 
@@ -305,7 +349,7 @@ if st.button("Submit Work Order"):
                 "SPD/LTL": carrier_type,
                 "Fee Type": fee["fee"],
                 "Quantity": fee["quantity"],
-                "Notes": "",
+                "Notes": st.session_state.work_order_notes,
                 "File Link": file_path
             })
         save_rows(rows)
