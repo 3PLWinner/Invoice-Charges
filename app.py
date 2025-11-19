@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import streamlit.components.v1 as components
 
 
 excel_file = 'master_work_orders.xlsx'
@@ -191,7 +192,7 @@ def save_rows(rows):
     df.to_excel(excel_file, index=False)
 
 
-# Initialize session state for all fee types
+
 if "receiving_fees" not in st.session_state:
     st.session_state.receiving_fees = []
 if "shipping_fees" not in st.session_state:
@@ -203,26 +204,6 @@ if "work_order_notes" not in st.session_state:
 
 #UI
 st.title("Digital Work Order Form")
-
-speech_event = st.query_params.get("speech_event")
-
-st.markdown("""
-<script>
-window.addEventListener("message", (event) => {
-    if (event.data.type === "st_speech") {
-        const key = event.data.key;
-        const text = event.data.text;
-
-        // Update Streamlit component value
-        window.parent.postMessage(
-            { type: "streamlit:componentValue", id: key, data: text },
-            "*"
-        );
-    }
-});
-</script>
-""", unsafe_allow_html=True)
-
 
 st.subheader("Work Order Details")
 
@@ -323,7 +304,7 @@ st.session_state.work_order_notes = notes_box
 
 st.markdown("""
 <button id="micBtn" style="padding: 10px 15px; font-size: 16px;">
-🎤 Dictate Notes
+Dictate Notes
 </button>
 <p id="status"></p>
 
